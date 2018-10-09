@@ -284,7 +284,7 @@ class IncludeTrie:
 		else:
 			next_word = phrase[0]
 			if next_word not in self.children:
-				self.children[next_word] = AvoidTrie()
+				self.children[next_word] = IncludeTrie()
 			self.step(next_word).add_phrase(phrase[1:])
 
 	def step(self, word_id: int) -> Optional['IncludeTrie']:
@@ -315,19 +315,19 @@ class IncludeTrie:
 		:param phrase: A list of word IDs, the path of which will be elimated from the current Trie
 		"""
 		# if we just satisfied a one-token constraint
-		if len(phrase) ==0:
+		if len(phrase) == 0:
 			# do nothing -- this should never happen!
-			return
-		if len(phrase) == 1:
+			pass
+		elif len(phrase) == 1:
 			if phrase[0] in self.final_ids:
 				self.final_ids.remove(phrase[0])
-			return
-		next_step = self.step(phrase[0])
-		if next_step:
-			if next_step.prune(phrase[1:]):
-				self.children.remove(phrase[0])
+		else:
+			next_step = self.step(phrase[0])
+			if next_step:
+				if next_step._prune(phrase[1:]):
+					self.children.pop(phrase[0], None)
 		# check if we have satisfied all constraints
-		return (not bool(self.final_ids)) and (not bool(self.children))
+		return (len(self.final_ids) == 0) and (len(self.children) == 0)
 
 	def final(self) -> Set[int]:
 		"""
@@ -380,12 +380,12 @@ class IncludeState:
 			next_state = self.state.step(word_id)
 			# go further or go home
 			if next_state:
-				return IncludeState(new_root, next_state, new_current_phrase)
-			return IncludeState(new_root, new_root)
-		elif word_id in self.state.children:
-			return IncludeState(self.root, self.state.step(word_id), current_phrase=self.current_phrase + [word_id])
+				return IncludeState(new_root, self.eos_id, state=next_state, current_phrase=new_current_phrase)
+			return IncludeState(new_root, self.eos_id, state=new_root)
+		elif word_id in self.state.children.keys():
+			return IncludeState(self.root, self.eos_id, state=self.state.step(word_id), current_phrase=self.current_phrase + [word_id])
 		elif self.state != self.root:
-			return IncludeState(self.root, self.root).consume(word_id)
+			return IncludeState(self.root, self.eos_id, state=self.root).consume(word_id)
 		return self
 	
 	def is_valid(self, wordid) -> bool:
@@ -432,7 +432,7 @@ class IncludeBatch:
 				 include_list: Optional[List[RawConstraintList]] = None,
 				 global_include_trie: Optional[IncludeTrie] = None) -> None:
 
-		print('haha! I have a beam size of ' + str(beam_size) + 'and a batch size of ' + str(batch_size))
+		#print('haha! I have a beam size of ' + str(beam_size) + 'and a batch size of ' + str(batch_size))
 		
 		self.states = []	# type: List[IncludeState]
 		# Store the global trie for each hypothesis
@@ -471,10 +471,7 @@ class IncludeBatch:
 		"""
 		word_ids = word_ids.asnumpy().tolist()
 		for i, word_id in enumerate(word_ids):
-			print('before state for no. ' + str(i) + str(self.states[i]))
 			self.states[i] = (self.states[i]).consume(word_id)
-			print(str(word_id) + ': after state for no. ' + str(i) + str(self.states[i]))
-			print('unmet for no. ' + str(i) + ': ' + str(self.states[i].unmet()))
 
 	def getUnmet(self) -> List[int]:
 		"""
@@ -650,7 +647,6 @@ class ConstrainedHypothesis:
 				pass
 
 		return obj
-
 def init_batch(raw_constraints: List[Optional[RawConstraintList]],
 			   beam_size: int,
 			   start_id: int,
@@ -701,11 +697,11 @@ def get_bank_sizes(num_constraints: int,
 	# will be made in lower buckets. This may not be the best strategy, but it is important
 	# that you start pushing from the bucket that is assigned the remainder, for cases where
 	# num_constraints >= beam_size.
-	for i in range(num_banks):
+	for i in reversed(range(num_banks)):
 		freeslots = assigned[i] - candidate_counts[i]
 		if freeslots > 0:
 			assigned[i] -= freeslots
-			assigned[(i + 1) % num_banks] += freeslots
+			assigned[(i - 1) % num_banks] += freeslots
 
 	return assigned
 
@@ -825,8 +821,9 @@ def _topk(beam_size: int,
 		col = int(col.asscalar())
 		seq_score = float(seq_score.asscalar())
 		if include_states[row].is_valid(col):
-			print("Huh! I'm consuming " + str(col) + " in _topk")
+			#print("Huh! I'm consuming " + str(col) + " in _topk")
 			new_item = include_states[row].consume(col)
+			#print("yum yum. Now I want:" + str(new_item.wanted()))
 			cand = ConstrainedCandidate(row, col, seq_score, new_item)
 			candidates.add(cand)
 			
@@ -841,7 +838,7 @@ def _topk(beam_size: int,
 		
 		# (2) add all the constraints that could extend this
 		nextones = hyp.wanted()
-		print('I want ' + str(nextones))
+		#print('hyp num ' + str(row) + ' says: I want ' + str(nextones))
 		# (3) add the single-best item after this (if it's valid)
 		col = int(best_next[row].asscalar())
 		if hyp.is_valid(col):
@@ -849,8 +846,9 @@ def _topk(beam_size: int,
 
 		# Now, create new candidates for each of these items
 		for col in nextones:
+			#print("Huh! Hpy num " + str(row) +" is consuming " + str(col) + " in _topk 2/3")
 			new_item = hyp.consume(col)
-			print("Huh! I'm consuming " + str(col) + " in _topk 2/3")
+			#print("yum yum. Now I want:" + str(new_item.wanted()))
 			score = scores[row, col].asscalar()
 			cand = ConstrainedCandidate(row, col, score, new_item)
 			candidates.add(cand)
@@ -859,40 +857,39 @@ def _topk(beam_size: int,
 	# for each bank from this list
 	sorted_candidates = sorted(candidates, key=attrgetter('score'))
 
-    # The number of hypotheses in each bank
-    counts = [0 for _ in range(num_constraints + 1)]
-    for cand in sorted_candidates:
-        if not cand.hypothesis:
-                counts[0] += 1
-        else:
-                counts[cand.hypothesis.unmet()] += 1
+	# The number of hypotheses in each bank
+	counts = [0 for x in range(num_constraints + 1)]
+	for cand in sorted_candidates:
+		counts[cand.hypothesis.unmet()] += 1
+	#print('counts b4')
+	#print(counts)
 
-    # Adjust allocated bank sizes if there are too few candidates in any of them
-    bank_sizes = get_bank_sizes(num_constraints, beam_size, counts)
+	# Adjust allocated bank sizes if there are too few candidates in any of them
+	bank_sizes = get_bank_sizes(num_constraints, beam_size, counts)
 
-    # Sort the candidates into the allocated banks
-    pruned_candidates = []	# type: List[ConstrainedCandidate]
-    for i, cand in enumerate(sorted_candidates):
-        bank = cand.hypothesis.unmet()
+	#print('counts after')
+	#print(bank_sizes)
+	# Sort the candidates into the allocated banks
+	pruned_candidates = []	# type: List[ConstrainedCandidate]
+	for i, cand in enumerate(sorted_candidates):
+		bank = cand.hypothesis.unmet()
 
-        if bank_sizes[bank] > 0:
-                pruned_candidates.append(cand)
-                bank_sizes[bank] -= 1
+		if bank_sizes[bank] > 0:
+			pruned_candidates.append(cand)
+			bank_sizes[bank] -= 1
 
-    num_pruned_candidates = len(pruned_candidates)
+	inactive[:len(pruned_candidates)] = 0
 
-    inactive[:num_pruned_candidates] = 0
+	# Pad the beam so array assignment still works
+	if len(pruned_candidates) < beam_size:
+		inactive[len(pruned_candidates):] = 1
+		pruned_candidates += [pruned_candidates[len(pruned_candidates) - 1]] * (beam_size - len(pruned_candidates))
 
-    # Pad the beam so array assignment still works
-    if num_pruned_candidates < beam_size:
-        inactive[num_pruned_candidates:] = 1
-        pruned_candidates += [pruned_candidates[num_pruned_candidates - 1]] * (beam_size - num_pruned_candidates)
-
-    return (np.array([x.row for x in pruned_candidates]),
-                    np.array([x.col for x in pruned_candidates]),
-                    np.array([[x.score] for x in pruned_candidates]),
-                    [x.hypothesis for x in pruned_candidates],
-                    inactive)
+	return (np.array([x.row for x in pruned_candidates]),
+			np.array([x.col for x in pruned_candidates]),
+			np.array([[x.score] for x in pruned_candidates]),
+			[x.hypothesis for x in pruned_candidates],
+			inactive)
 
 
 def main(args):
