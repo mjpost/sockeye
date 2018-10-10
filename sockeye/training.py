@@ -227,10 +227,10 @@ class TrainingModel(model.SockeyeModel):
         """
         Returns a mapping of parameters names to gradient arrays. Parameter names are prefixed with the device.
         """
+        # We may have None if not all parameters are optimized
         return {"dev_%d_%s" % (i, name): exe.grad_arrays[j] for i, exe in enumerate(self.executors) for j, name in
                 enumerate(self.executor_group.arg_names)
                 if name in self.executor_group.param_names and self.executors[0].grad_arrays[j] is not None}
-                # We may have None if not all parameters are optimized
 
     def get_global_gradient_norm(self) -> float:
         """
@@ -752,8 +752,7 @@ class EarlyStoppingTrainer:
                               "gradient-norm": self.state.gradient_norm,
                               "time-elapsed": time.time() - self.state.start_tic}
         gpu_memory_usage = utils.get_gpu_memory_usage(self.model.context)
-        if gpu_memory_usage is not None:
-            checkpoint_metrics['used-gpu-memory'] = sum(v[0] for v in gpu_memory_usage.values())
+        checkpoint_metrics['used-gpu-memory'] = sum(v[0] for v in gpu_memory_usage.values())
 
         for name, value in metric_train.get_name_value():
             checkpoint_metrics["%s-train" % name] = value

@@ -150,7 +150,7 @@ def get_validation_image_text_data_iter(data_loader: RawParallelDatasetLoader,
                                                      buckets=buckets,
                                                      length_ratio_mean=1.0,
                                                      length_ratio_std=1.0,
-                                                     source_vocabs=[None],
+                                                     source_vocabs=None,
                                                      target_vocab=vocab_target)
     validation_data_statistics.log(bucket_batch_sizes)
 
@@ -225,7 +225,7 @@ def get_training_image_text_data_iters(source_root: str,
                                           buckets=buckets,
                                           length_ratio_mean=1.0,
                                           length_ratio_std=1.0,
-                                          source_vocabs=[None],
+                                          source_vocabs=None,
                                           target_vocab=vocab_target)
 
     bucket_batch_sizes = define_bucket_batch_sizes(buckets,
@@ -335,7 +335,7 @@ class ImageTextSampleIter(ParallelSampleIter):
                 for bucket in self.data.source:
                     for k in bucket:
                         if k not in self.loaded_source:  # avoid to load twice
-                            self.loaded_source[k] = load_feature(k, self.image_size)
+                            self.loaded_source[k] = load_feature(k)
                 logger.info("Feature loaded in {} seconds.".format(time.time() - start))
         else:
             self.data_loader = functools.partial(load_preprocess_images,
