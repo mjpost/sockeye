@@ -131,7 +131,7 @@ def run_translate(args: argparse.Namespace):
                     return outputs[0].translation
 
             api.add_resource(WebTranslator, "/translate")
-            app.run(debug=True)
+            app.run(debug=True, port=args.server)
 
         else:
             read_and_translate(translator=translator,
