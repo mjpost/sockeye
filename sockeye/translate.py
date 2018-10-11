@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 """
-Translation CLI.
+RESTful translation server.
 """
 import argparse
 import sys
@@ -25,10 +25,13 @@ from sockeye.lexicon import TopKLexicon
 from sockeye.log import setup_main_logger
 from sockeye.output_handler import get_output_handler, OutputHandler
 from sockeye.utils import determine_context, log_basic_info, check_condition, grouper
-from . import arguments
-from . import constants as C
-from . import data_io
-from . import inference
+from sockeye import arguments
+from sockeye import constants as C
+from sockeye import data_io
+from sockeye import inference
+
+from flask import Flask
+from flask_restful import Api, Resource, reqparse
 
 logger = setup_main_logger(__name__, file_logging=False)
 
@@ -108,12 +111,36 @@ def run_translate(args: argparse.Namespace):
                                           store_beam=store_beam,
                                           strip_unknown_words=args.strip_unknown_words,
                                           skip_topk=args.skip_topk)
-        read_and_translate(translator=translator,
-                           output_handler=output_handler,
-                           chunk_size=args.chunk_size,
-                           input_file=args.input,
-                           input_factors=args.input_factors,
-                           input_is_json=args.json_input)
+        if args.server is not None:
+            app = Flask('sockeye')
+            api = Api(app)
+
+            class WebTranslator(Resource):
+                def get(self):
+                    parser = reqparse.RequestParser()
+                    parser.add_argument('text', type=str)
+                    args = parser.parse_args()
+
+                    print('REQUEST', args)
+
+                    trans_input = inference.make_input_from_plain_string(1, args['text'])
+                    outputs = translator.translate([trans_input])
+
+                    print('OUTPUT', outputs, outputs[0].translation)
+
+                    return outputs[0].translation
+
+            api.add_resource(WebTranslator, "/translate")
+            app.run(debug=True)
+
+        else:
+            read_and_translate(translator=translator,
+                               output_handler=output_handler,
+                               chunk_size=args.chunk_size,
+                               input_file=args.input,
+                               input_factors=args.input_factors,
+                               input_is_json=args.json_input)
+
 
 
 def make_inputs(input_file: Optional[str],

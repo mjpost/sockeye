@@ -1075,6 +1075,7 @@ def add_train_cli_args(params):
 
 def add_translate_cli_args(params):
     add_inference_args(params)
+    add_server_args(params)
     add_device_args(params)
     add_logging_args(params)
 
@@ -1137,6 +1138,13 @@ def add_max_output_cli_args(params):
                         help='Maximum number of words to generate during translation. '
                              'If None, it will be computed automatically. Default: %(default)s.')
 
+
+def add_server_args(params):
+    server_params = params.add_argument_group("Server parameters")
+    server_params.add_argument('--server',
+                               default=None,
+                               type=int,
+                               help='Enable RESTful server on specified port.')
 
 def add_inference_args(params):
     decode_params = params.add_argument_group("Inference parameters")

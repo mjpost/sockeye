@@ -694,8 +694,21 @@ def make_input_from_json_string(sentence_id: SentenceId, json_string: str) -> Tr
            for the input text.
     :return: A TranslatorInput.
     """
+
+    return make_input_from_json(json.loads(json_string, encoding=C.JSON_ENCODING))
+
+
+def make_input_from_json(sentence_id: SentenceId, jobj: Dict) -> TranslatorInput:
+    """
+    Returns a TranslatorInput object from a JSON object, serialized as a string.
+
+    :param sentence_id: Sentence id.
+    :param json_string: A JSON object that must contain a key "text", mapping to the input text,
+           and optionally a key "factors" that maps to a list of strings, each of which representing a factor sequence
+           for the input text.
+    :return: A TranslatorInput.
+    """
     try:
-        jobj = json.loads(json_string, encoding=C.JSON_ENCODING)
         tokens = jobj[C.JSON_TEXT_KEY]
         tokens = list(data_io.get_tokens(tokens))
         factors = jobj.get(C.JSON_FACTORS_KEY)
