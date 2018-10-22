@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Tuple, Set
 
 import mxnet as mx
 import numpy as np
+import pdb
 
 logger = logging.getLogger(__name__)
 
@@ -361,7 +362,7 @@ class IncludeState:
         Consumes a word, and updates the state based on it. Returns new objects on a state change.
 
         The next state for a word can be the following cases:
-        (1)    If the this finishes a constraint, we prune the branch.
+        (1) If the this finishes a constraint, we prune the branch.
         (2) If the word is found in our set of outgoing child arcs, we take that transition.
         (3) If the word is not found, we need to reset to root (or stay at root if already) and then try again.
         (4) Otherwise, just return self
@@ -432,9 +433,10 @@ class IncludeBatch:
                  include_list: Optional[List[RawConstraintList]] = None,
                  global_include_trie: Optional[IncludeTrie] = None) -> None:
 
-        #print('haha! I have a beam size of ' + str(beam_size) + 'and a batch size of ' + str(batch_size))
-        
         self.states = []    # type: List[IncludeState]
+        self.wanted_indices = []
+        for _ in range(batch_size * beam_size):
+            self.wanted_indices.append([])
         # Store the global trie for each hypothesis
         if global_include_trie is not None:
             for token in global_include_trie:
@@ -451,7 +453,12 @@ class IncludeBatch:
             else:
                 for (i, raw_phrases) in enumerate(include_list):
                     self.states += [IncludeState(IncludeTrie(raw_phrases), eos_id=eos_id)] * beam_size
-
+        '''
+        # initialize wanted        
+        for i in range(len(self.states)):
+            self.wanted_indices[i].extend(list((self.states[i]).wanted()))
+        '''
+        self.eos_id = eos_id
     def reorder(self, indices: mx.nd.NDArray) -> None:
         """
         Reorders the avoid list according to the selected row indices.
@@ -469,206 +476,48 @@ class IncludeBatch:
 
         :param word_ids: The set of word IDs.
         """
+        #print('consuming:', word_ids)
         word_ids = word_ids.asnumpy().tolist()
         for i, word_id in enumerate(word_ids):
             self.states[i] = (self.states[i]).consume(word_id)
 
-    def getUnmet(self) -> List[int]:
+        #print('now I want:', self.getWanted())
+    def getWanted(self) -> (mx.nd.NDArray, mx.nd.NDArray):
+        """
+        Return the next wanted word id as a 2d list.
+        """
+        
+        wanted_ids = []
+        wanted_word_ids = []
+            
+        #print('num of states:', len(self.states))
+
+        for (slot_id, slot) in enumerate([list(self.states[i].wanted()) for i in range(len(self.states))]):
+            for word_id in slot:
+                wanted_ids.append(slot_id)
+                wanted_word_ids.append(word_id)
+
+        return (mx.nd.array(wanted_ids), mx.nd.array(wanted_word_ids))
+    
+    def getFinished(self) -> mx.nd.NDArray:
+        """
+        Return the next wanted word id in a 2d multi-hot matrix.
+        """
+        result = []
+        
+        for i in range(len(self.states)):
+            result.append(1 if self.states[i].root == None else 0)
+        return mx.nd.array(result)
+
+    def getUnmet(self) -> mx.nd.NDArray:
         """
         Return the number of unmet constraints for each tracked hypothesis.
         """
         result = []
         for i in range(len(self.states)):
             result.append(self.states[i].unmet())
-        return result
+        return np.array(result)
 
-'''
-class ConstrainedHypothesis:
-    """
-    Represents a set of words and phrases that must appear in the output.
-    A constraint is of two types: sequence or non-sequence.
-    A non-sequence constraint is a single word and can therefore be followed by anything,
-    whereas a sequence constraint must be followed by a particular word (the next word in the sequence).
-    This class also records which constraints have been met.
-
-    A list of raw constraints is maintained internally as two parallel arrays. The following raw constraint
-    represents two phrases that must appear in the output: 14 and 19 35 14.
-
-        raw constraint: [[14], [19, 35, 14]]
-
-    This is represented internally as:
-
-        constraints: [14 19 35 14]
-        is_sequence: [False False True True]
-
-    That is, the constraints are simply concatenated, and we maintain a parallel array indicating whether each
-    token ID must be followed by the next token ID. The same token ID can be present any number of times.
-
-    :param constraint_list: A list of zero or raw constraints (each represented as a list of integers).
-    :param eos_id: The end-of-sentence ID.
-    """
-
-    def __init__(self,
-                 constraint_list: RawConstraintList,
-                 eos_id: int) -> None:
-
-        # `constraints` records the words of the constraints, as a list (duplicates allowed).
-        # `is_sequence` is a parallel array that records, for each corresponding constraint,
-        #     whether the current word is the non-final word of a phrasal constraint.
-        self.constraints = []  # type: List[int]
-        self.is_sequence = []  # type: List[bool]
-        for phrase in constraint_list:
-            self.constraints += phrase
-            self.is_sequence += [True] * len(phrase)
-            self.is_sequence[-1] = False
-
-        self.eos_id = eos_id
-
-        # no constraints have been met
-        self.met = [False for x in self.constraints]
-        self.last_met = -1
-
-    def __len__(self) -> int:
-        """
-        :return: The number of constraints.
-        """
-        return len(self.constraints)
-
-    def __str__(self) -> str:
-        s = []
-        for i, word_id in enumerate(self.constraints):
-            s.append(str(word_id) if self.met[i] is False else 'X')
-            if self.is_sequence[i]:
-                s.append('->')
-        return ' '.join(s)
-
-    def size(self) -> int:
-        """
-        :return: the number of constraints
-        """
-        return len(self.constraints)
-
-    def num_met(self) -> int:
-        """
-        :return: the number of constraints that have been met.
-        """
-        return sum(self.met)
-
-    def num_needed(self) -> int:
-        """
-        :return: the number of un-met constraints.
-        """
-        return self.size() - self.num_met()
-
-    def allowed(self) -> Set[int]:
-        """
-        Returns the set of constrained words that could follow this one.
-        For unfinished phrasal constraints, it is the next word in the phrase.
-        In other cases, it is the list of all unmet constraints.
-        If all constraints are met, an empty set is returned.
-
-        :return: The ID of the next required word, or -1 if any word can follow
-        """
-        items = set()  # type: Set[int]
-        # Add extensions of a started-but-incomplete sequential constraint
-        if self.last_met != -1 and self.is_sequence[self.last_met] == 1:
-            word_id = self.constraints[self.last_met + 1]
-            if word_id != self.eos_id or self.num_needed() == 1:
-                items.add(word_id)
-
-        # Add all constraints that aren't non-initial sequences
-        else:
-            for i, word_id in enumerate(self.constraints):
-                if not self.met[i] and (i == 0 or not self.is_sequence[i - 1]):
-                    if word_id != self.eos_id or self.num_needed() == 1:
-                        items.add(word_id)
-
-        return items
-
-    def finished(self) -> bool:
-        """
-        Return true if all the constraints have been met.
-
-        :return: True if all the constraints are met.
-        """
-        return self.num_needed() == 0
-
-    def is_valid(self, wordid) -> bool:
-        """
-        Ensures </s> is only generated when the hypothesis is completed.
-
-        :param wordid: The wordid to validate.
-        :return: True if all constraints are already met or the word ID is not the EOS id.
-        """
-        return self.finished() or wordid != self.eos_id or (self.num_needed() == 1 and self.eos_id in self.allowed())
-
-    def advance(self, word_id: int) -> 'ConstrainedHypothesis':
-        """
-        Updates the constraints object based on advancing on word_id.
-        There is a complication, in that we may have started but not
-        yet completed a multi-word constraint.    We need to allow constraints
-        to be added as unconstrained words, so if the next word is
-        invalid, we must "back out" of the current (incomplete) phrase,
-        re-setting all of its words as unmet.
-
-        :param word_id: The word ID to advance on.
-        :return: A deep copy of the object, advanced on word_id.
-        """
-
-        obj = copy.deepcopy(self)
-
-        # First, check if we're updating a sequential constraint.
-        if obj.last_met != -1 and obj.is_sequence[obj.last_met] == 1:
-            if word_id == obj.constraints[obj.last_met + 1]:
-                # Here, the word matches what we expect next in the constraint, so we update everything
-                obj.met[obj.last_met + 1] = True
-                obj.last_met += 1
-            else:
-                # Here, the word is not the expected next word of the constraint, so we back out of the constraint.
-                index = obj.last_met
-                while obj.is_sequence[index]:
-                    obj.met[index] = False
-                    index -= 1
-                obj.last_met = -1
-
-        # If not, check whether we're meeting a single-word constraint
-        else:
-            # Build a list from all constraints of tuples of the
-            # form (constraint, whether it's a non-initial sequential, whether it's been met)
-            constraint_tuples = list(zip(obj.constraints, [False] + obj.is_sequence[:-1], obj.met))
-            # We are searching for an unmet constraint (word_id) that is not the middle of a phrase and is not met
-            query = (word_id, False, False)
-            try:
-                pos = constraint_tuples.index(query)
-                obj.met[pos] = True
-                obj.last_met = pos
-            except ValueError:
-                # query not found; identical but duplicated object will be returned
-                pass
-
-        return obj
-def init_batch(raw_constraints: List[Optional[RawConstraintList]],
-               beam_size: int,
-               start_id: int,
-               eos_id: int) -> List[Optional[ConstrainedHypothesis]]:
-    """
-    :param raw_constraints: The list of raw constraints (list of list of IDs).
-    :param beam_size: The beam size.
-    :param start_id: The target-language vocabulary ID of the SOS symbol.
-    :param eos_id: The target-language vocabulary ID of the EOS symbol.
-    :return: A list of ConstrainedHypothesis objects (shape: (batch_size * beam_size,)).
-    """
-    constraints = [None] * (len(raw_constraints) * beam_size)  # type: List[Optional[ConstrainedHypothesis]]
-    if any(raw_constraints):
-        for i, raw_list in enumerate(raw_constraints):
-            num_constraints = sum([len(phrase) for phrase in raw_list]) if raw_list is not None else 0
-            if num_constraints > 0:
-                hyp = ConstrainedHypothesis(raw_list, eos_id)
-                idx = i * beam_size
-                constraints[idx:idx + beam_size] = [hyp.advance(start_id) for x in range(beam_size)]
-
-    return constraints
-'''
 
 def get_bank_sizes(num_constraints: int,
                    beam_size: int,
@@ -763,27 +612,139 @@ def topk(batch_size: int,
     :return: A tuple containing the best hypothesis rows, the best hypothesis words, the scores,
         the updated constrained hypotheses, and the updated set of inactive hypotheses.
     """
+    
+    wanted_ids, wanted_word_ids = include_states.getWanted() # shape ((batch*beam) * target_vocab)
+    #print('wanted', wanted_ids, wanted_word_ids)
+    finished_indices = include_states.getFinished() # shape ((batch*beam) * 1)
+    
+    global_topk = mx.nd.zeros_like(scores, ctx=context)
+    
+    global_topk[best_ids, best_word_ids] = 1
+    global_topk[:, include_states.eos_id] *= finished_indices.as_in_context(context)
 
+    #print("sliced global topk", global_topk[0])
+    
+    wanted_hyp = mx.nd.zeros_like(scores, ctx=context)
+    wanted_hyp[wanted_ids.as_in_context(context), wanted_word_ids.as_in_context(context)] = 1
+    
+    best_next = mx.nd.zeros_like(scores, ctx=context)
+    best_next_idx = mx.nd.NDArray.argmin(scores, axis=1)
+    
+    best_next[mx.nd.arange(best_next_idx.shape[0], ctx=context), best_next_idx] = 1
+
+    final_hyp = global_topk + wanted_hyp + best_next
+    # only keep hypotheses we want to explore
+    scores = np.where(final_hyp.asnumpy(), scores.asnumpy(), np.inf)
+
+    final_ids, final_word_ids = np.where(scores != np.inf)
+    sent_ids, _ = np.where(scores.reshape((batch_size, -1)) != np.inf)
+    final_seq_scores = scores[final_ids, final_word_ids]
+    
+    unmet = include_states.getUnmet()[final_ids]
+    
+    big_matrix = np.stack((sent_ids, unmet, final_seq_scores, final_ids, final_word_ids))
+    
+    #print(final_ids, final_word_ids)
+    
+    # update unmet
+     
+    big_matrix[1, :] -= np.isin(big_matrix[-2,:], wanted_ids.asnumpy()).astype(int) * np.isin(big_matrix[-1,:], wanted_word_ids.asnumpy()).astype(int)
+    
+    big_matrix = big_matrix[:, np.lexsort((big_matrix[2, :], big_matrix[1, :], big_matrix[0, :]))]
+    
+    def constructParallel(a):
+        _, ind = np.unique(a, return_index=True)
+        return np.arange(0, len(a)) - ind[np.digitize(a, a[ind]) - 1]
+
+    parallel = constructParallel(big_matrix[1, :])
+
+    big_matrix = np.insert(big_matrix, 1, parallel, axis=0)
+
+    big_matrix = big_matrix[:, np.lexsort((big_matrix[3, :], big_matrix[1, :], big_matrix[0, :]))]
+
+    parallel = constructParallel(big_matrix[0, :])
+    
+    big_matrix = np.concatenate((big_matrix, parallel.reshape(1, -1)), axis=0)
+    #print(big_matrix)
+    big_matrix = big_matrix[:, big_matrix[-1, :] < beam_size]
+
+    
+    '''
+    final_hypotheses = []
+    for i in range(len(final_ids)):
+        final_hypotheses.append(include_states.states[final_ids[i]].consume(final_word_ids[i]))
+    final_hypotheses = np.array(final_hypotheses)
+    
+    final_order = np.zeros((batch_size*beam_size, ), dtype=np.int32)
+    
+    
     for sentno in range(batch_size):
         rows = slice(sentno * beam_size, (sentno + 1) * beam_size)
-        if True: #include_states.states[sentno] is not None and len(include_states.states[sentno]) > 0:
-            best_ids[rows], best_word_ids[rows], seq_scores[rows], \
-            include_states.states[rows], inactive[rows] = _topk(beam_size,
-                                                     inactive[rows],
-                                                     scores[rows],
-                                                     include_states.states[rows],
-                                                     best_ids[rows] - rows.start,
-                                                     best_word_ids[rows],
-                                                     seq_scores[rows],
-                                                     context)
 
-            # offsetting since the returned smallest_k() indices were slice-relative
-            best_ids[rows] += rows.start
-        else:
-            # If there are no constraints for this sentence in the batch, everything stays
-            # the same, except we need to mark all hypotheses as active
-            inactive[rows] = 0
+        
+        
+        
+        sorted_index = np.argsort(final_seq_scores[rows])
+        # construct the final lists
+        final_ids[rows] = final_ids[rows][sorted_index]
+        final_word_ids[rows] = final_word_ids[rows][sorted_index]
+        final_hypotheses[rows] = final_hypotheses[rows][sorted_index]
+        final_seq_scores[rows] = final_seq_scores[rows][sorted_index]
 
+
+        
+        
+        
+        
+        num_constraints = max([state.unmet() for state in include_states.states[rows]])
+
+        counts = [0 for x in range(num_constraints + 1)]
+        for hypo in final_hypotheses[rows]:
+            counts[hypo.unmet()] += 1
+
+        # Adjust allocated bank sizes if there are too few candidates in any of them
+        bank_sizes = get_bank_sizes(num_constraints, beam_size, counts)
+
+        # Sort the candidates into the allocated banks
+        pruned_candidates = []  # type: List[ConstrainedCandidate]
+        for i, hypo in enumerate(final_hypotheses[rows]):
+            bank = hypo.unmet()
+
+            if bank_sizes[bank] > 0:
+                pruned_candidates.append(i)
+                bank_sizes[bank] -= 1
+
+        inactive[rows][:len(pruned_candidates)] = 0
+
+        # Pad the beam so array assignment still works
+        if len(pruned_candidates) < beam_size:
+            inactive[rows][len(pruned_candidates):] = 1
+            pruned_candidates += [pruned_candidates[len(pruned_candidates) - 1]] * (beam_size - len(pruned_candidates))
+        
+        
+        final_order[rows] = np.array(pruned_candidates) + rows.start
+    
+    final_ids = final_ids[final_order]
+    final_word_ids = final_word_ids[final_order]
+    final_seq_scores = final_seq_scores[final_order]
+    '''
+    #print(big_matrix.shape)
+
+    inactive[:big_matrix.shape[1]] = 0
+    if big_matrix.shape[1] < batch_size * beam_size:
+        padding = np.zeros((big_matrix[0], batch_size * beam_size - big_matrix.shape[1]))
+        big_matrix = np.concatenate((big_matrix, padding), axis=1)
+        inactive[big_matrix.shape[1]:] = 1
+        
+
+    best_ids[:] = (big_matrix[-3, :]).reshape(-1,)
+    best_word_ids[:] = (big_matrix[-2, :]).reshape(-1,)
+    seq_scores[:] = (big_matrix[-4, :]).reshape(-1, 1)
+
+    include_states.reorder(best_ids.asnumpy())
+    include_states.consume(best_word_ids)
+   
+   
     return best_ids, best_word_ids, seq_scores, include_states, inactive
 
 
