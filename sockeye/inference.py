@@ -1489,16 +1489,6 @@ class Translator:
         self._prune_hyps.initialize(ctx=self.context)
         self._prune_hyps.hybridize(static_alloc=True, static_shape=True)
 			
-
-		self.global_include_trie = None
-        if include_list is not None:
-            self.global_include_trie = constrained.IncludeTrie()
-            for phrase in data_io.read_content(include_list):
-                phrase_ids = data_io.tokens2ids(phrase, self.vocab_target)
-                if self.unk_id in phrase_ids:
-                    logger.warning("Global avoid phrase '%s' contains an %s; this may indicate improper preprocessing.", ' '.join(phrase), C.UNK_SYMBOL)
-                self.global_include_trie.add_phrase(phrase_ids)
-
         self.global_avoid_trie = None
         if avoid_list is not None:
             self.global_avoid_trie = constrained.AvoidTrie()
@@ -1760,8 +1750,8 @@ class Translator:
             if trans_input.include_list is not None:
                 raw_include_list[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
                                       trans_input.include_list]
-				if any(self.unk_id in phrase for phrase in raw_avoid_list[j]):
-                    logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "
+                if any(self.unk_id in phrase for phrase in raw_include_list[j]):
+                    logger.warning("Sentence %s: %s was found in the list of phrases to include; "
                                    "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
 
@@ -3009,11 +2999,10 @@ class Translator:
         #                                      self.vocab_target[C.EOS_SYMBOL])
 
         include_states = None
-        if self.global_include_trie or any(raw_include_list):
+        if any(raw_include_list):
             include_states = constrained.IncludeBatch(self.batch_size,
                                                       self.beam_size,
                                                       include_list=raw_include_list,
-                                                      global_include_trie=self.global_include_trie,
                                                       eos_id=self.vocab_target[C.EOS_SYMBOL])
             include_states.consume(best_word_indices)
 
@@ -3197,8 +3186,7 @@ class Translator:
 
         if include_states:
             # For constrained decoding, select from items that have met all constraints (might not be finished)
-            unmet = np.array(include_states.getUnmet())  # for IncludeBatch, 
-            print(unmet)
+            unmet = include_states.get_unmet()  # for IncludeBatch, 
             filtered = np.where(unmet == 0, seq_scores.flatten(), np.inf)
             filtered = filtered.reshape((self.batch_size, self.beam_size))
             best_ids += np.argmin(filtered, axis=1).astype('int32')
@@ -3286,7 +3274,7 @@ class Translator:
             score = accumulated_scores[i].asscalar()
             word_ids = [int(x.asscalar()) for x in sequences[i]]
             #unmet = constraints[i].num_needed() if constraints[i] is not None else -1
-            unmet = include_states.getUnmet[i]
+            unmet = include_states.get_unmet[i]
             hypothesis = '----------' if inactive[i] else ' '.join(
                 [self.vocab_target_inv[x] for x in word_ids if x != 0])
             logger.info('%d %d %d %d %.2f %s', i + 1, finished[i].asscalar(), inactive[i].asscalar(), unmet, score,
