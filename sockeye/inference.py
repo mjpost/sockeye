@@ -3054,7 +3054,8 @@ class Translator:
                     best_hyp_indices,
                     best_word_indices,
                     scores_accumulated,
-                    self.context)
+                    self.context,
+                    self.beam_prune)
 
             else:
                 # All rows are now active (after special treatment of start state at t=1)
@@ -3078,6 +3079,7 @@ class Translator:
                                                                                   scores_accumulated,
                                                                                   lengths)
 
+            '''
             # (6) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
             if self.beam_prune > 0.0:
                 inactive, best_word_indices, scores_accumulated = self._prune_hyps.forward(best_word_indices,
@@ -3085,6 +3087,7 @@ class Translator:
                                                                                            finished,
                                                                                            self.inf_array,
                                                                                            self.zeros_array)
+            '''
 
             # (7) update negative constraints
             if self.global_avoid_trie or any(raw_avoid_list):
