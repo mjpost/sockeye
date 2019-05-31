@@ -100,9 +100,9 @@ class TransformerEncoderBlock:
 
     def __call__(self, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
         # self-attention
-        data_self_att = self.self_attention(inputs=self.pre_self_attention(data, None),
-                                            bias=bias,
-                                            cache=None)
+        data_self_att, _ = self.self_attention(inputs=self.pre_self_attention(data, None),
+                                               bias=bias,
+                                               cache=None)
         data = self.post_self_attention(data_self_att, data)
 
         # feed-forward
@@ -172,15 +172,15 @@ class TransformerDecoderBlock:
                  source_bias: mx.sym.Symbol,
                  cache: Optional[Dict[str, Optional[mx.sym.Symbol]]] = None) -> mx.sym.Symbol:
         # self-attention
-        target_self_att = self.self_attention(inputs=self.pre_self_attention(target, None),
+        target_self_att, _ = self.self_attention(inputs=self.pre_self_attention(target, None),
                                               bias=target_bias,
                                               cache=cache)
         target = self.post_self_attention(target_self_att, target)
 
         # encoder attention
-        target_enc_att = self.enc_attention(queries=self.pre_enc_attention(target, None),
-                                            memory=source,
-                                            bias=source_bias)
+        target_enc_att, attention_probs = self.enc_attention(queries=self.pre_enc_attention(target, None),
+                                                             memory=source,
+                                                             bias=source_bias)
         target = self.post_enc_attention(target_enc_att, target)
 
         # feed-forward
@@ -190,7 +190,7 @@ class TransformerDecoderBlock:
         if self.lhuc:
             target = self.lhuc(target)
 
-        return target
+        return target, attention_probs
 
 
 class TransformerProcessBlock:

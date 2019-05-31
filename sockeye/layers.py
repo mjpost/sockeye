@@ -327,7 +327,7 @@ def dot_attention(queries: mx.sym.Symbol,
     probs = mx.sym.Dropout(probs, p=dropout) if dropout > 0.0 else probs
 
     # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
-    return mx.sym.batch_dot(lhs=probs, rhs=values, name='%scontexts' % prefix)
+    return mx.sym.batch_dot(lhs=probs, rhs=values, name='%scontexts' % prefix), probs
 
 
 class MultiHeadAttentionBase:
@@ -383,8 +383,8 @@ class MultiHeadAttentionBase:
         lengths = broadcast_to_heads(lengths, self.heads, ndim=1, fold_heads=True) if lengths is not None else lengths
 
         # (batch*heads, query_max_length, depth_per_head)
-        contexts = dot_attention(queries, keys, values,
-                                 lengths=lengths, dropout=self.dropout, bias=bias, prefix=self.prefix)
+        contexts, attention_probs = dot_attention(queries, keys, values,
+                                                  lengths=lengths, dropout=self.dropout, bias=bias, prefix=self.prefix)
 
         # (batch, query_max_length, depth)
         contexts = combine_heads(contexts, self.depth_per_head, self.heads)
@@ -396,7 +396,10 @@ class MultiHeadAttentionBase:
                                          num_hidden=self.depth_out,
                                          flatten=False)
 
-        return contexts
+        # attention_probs: (batch, length, heads, source_length)
+        attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, self.heads, 0, 0))
+
+        return contexts, attention_probs
 
 
 class MultiHeadSelfAttention(MultiHeadAttentionBase):
@@ -584,7 +587,7 @@ class ProjectedDotAttention:
         queries = queries * (self.num_hidden ** -0.5)
 
         # (batch, queries_max_length, num_hidden)
-        contexts = dot_attention(queries, keys, values, memory_lengths)
+        contexts, _ = dot_attention(queries, keys, values, memory_lengths)
 
         return contexts
 
@@ -608,7 +611,7 @@ class PlainDotAttention:
         """
 
         # (batch*heads, queries_max_length, depth_per_head)
-        contexts = dot_attention(queries, memory, memory, memory_lengths)
+        contexts, _ = dot_attention(queries, memory, memory, memory_lengths)
 
         return contexts
 

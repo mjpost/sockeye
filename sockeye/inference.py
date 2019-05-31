@@ -917,6 +917,12 @@ class TranslatorOutput:
         _d['translation'] = self.translation
         _d['score'] = self.score
 
+        # Add attentions
+#        print(self.attention_matrix.shape)
+        _d['attention'] = []
+        for i, word in enumerate(self.translation.split()):
+            _d['attention'].append(['{:.5f}'.format(f) for f in self.attention_matrix.T[i]])
+
         if self.nbest_translations is not None and len(self.nbest_translations) > 1:
             _d['translations'] = self.nbest_translations
             _d['scores'] = self.nbest_scores

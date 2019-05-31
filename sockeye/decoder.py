@@ -320,23 +320,25 @@ class TransformerDecoder(Decoder):
 
         new_states = [source_encoded, source_encoded_lengths]
         layer_caches = self._get_cache_per_layer(cast(List[mx.sym.Symbol], cache))
+        attention_probs = None
         for layer, layer_cache in zip(self.layers, layer_caches):
-            target = layer(target=target,
-                           target_bias=target_bias,
-                           source=source_encoded,
-                           source_bias=source_bias,
-                           cache=layer_cache)
+            target, layer_probs = layer(target=target,
+                                        target_bias=target_bias,
+                                        source=source_encoded,
+                                        source_bias=source_bias,
+                                        cache=layer_cache)
             # store updated keys and values in states list.
             # (layer.__call__() has the side-effect of updating contents of layer_cache)
             new_states += [layer_cache['k'], layer_cache['v']]
+            attention_probs = layer_probs
 
         # (batch_size, 1, model_size)
         target = self.final_process(data=target, prev=None)
         # (batch_size, model_size)
         target = mx.sym.reshape(target, shape=(-3, -1))
 
-        # TODO(fhieber): no attention probs for now
-        attention_probs = mx.sym.sum(mx.sym.zeros_like(source_encoded), axis=2, keepdims=False)
+        attention_probs = mx.sym.stack(*attention_probs, axis=0)
+        attention_probs = mx.sym.mean(attention_probs, axis=(0, 2), keepdims=False).reshape((0, -3))
 
         return target, attention_probs, new_states
 
