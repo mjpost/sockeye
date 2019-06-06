@@ -414,7 +414,7 @@ class DotAttentionCell(mx.gluon.HybridBlock):
         probs = F.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
 
         # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
-        return F.batch_dot(lhs=probs, rhs=values)
+        return F.batch_dot(lhs=probs, rhs=values), probs
 
 
 class MultiHeadAttentionBase(mx.gluon.HybridBlock):

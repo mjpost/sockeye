@@ -950,7 +950,7 @@ class TranslatorOutput:
         self.nbest_attention_matrices = nbest_attention_matrices
         self.nbest_scores = nbest_scores
 
-    def json(self, align_threshold: float = 0.0) -> Dict:
+    def json(self, align_threshold: float = 0.0, output_attentions: bool = False) -> Dict:
         """
         Returns a dictionary suitable for json.dumps() representing all
         the information in the class. It is initialized with any keys
@@ -967,10 +967,10 @@ class TranslatorOutput:
         _d['score'] = self.score
 
         # Add attentions
-#        print(self.attention_matrix.shape)
-        _d['attention'] = []
-        for i, word in enumerate(self.translation.split()):
-            _d['attention'].append(['{:.5f}'.format(f) for f in self.attention_matrix.T[i]])
+        if output_attentions:
+            _d['attention'] = []
+            for i, word in enumerate(self.translation.split()):
+                _d['attention'].append(['{:.5f}'.format(f) for f in self.attention_matrix[i]])
 
         if self.nbest_translations is not None and len(self.nbest_translations) > 1:
             _d['translations'] = self.nbest_translations

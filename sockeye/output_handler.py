@@ -24,7 +24,8 @@ from sockeye.utils import plot_attention, print_attention_text, get_alignments
 
 def get_output_handler(output_type: str,
                        output_fname: Optional[str] = None,
-                       sure_align_threshold: float = 1.0) -> 'OutputHandler':
+                       sure_align_threshold: float = 1.0,
+                       output_attentions: bool = False) -> 'OutputHandler':
     """
 
     :param output_type: Type of output handler.
@@ -55,7 +56,7 @@ def get_output_handler(output_type: str,
     elif output_type == C.OUTPUT_HANDLER_BEAM_STORE:
         return BeamStoringHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_JSON:
-        return JSONOutputHandler(output_stream, sure_align_threshold)
+        return JSONOutputHandler(output_stream, sure_align_threshold, output_attentions)
     else:
         raise ValueError("unknown output type")
 
@@ -398,9 +399,10 @@ class JSONOutputHandler(OutputHandler):
     Output single-line JSON objects.
     Carries over extra fields from the input.
     """
-    def __init__(self, stream, threshold: float = 0.0) -> None:
+    def __init__(self, stream, threshold: float = 0.0, output_attentions: bool = False) -> None:
         self.stream = stream
         self.align_threshold = threshold
+        self.output_attentions = output_attentions
 
     def handle(self,
                t_input: inference.TranslatorInput,
@@ -410,7 +412,7 @@ class JSONOutputHandler(OutputHandler):
         Outputs a JSON object of the fields in the `TranslatorOutput` object.
         """
 
-        d_ = t_output.json(self.align_threshold)
+        d_ = t_output.json(self.align_threshold, output_attentions=self.output_attentions)
 
         self.stream.write("%s\n" % json.dumps(d_, sort_keys=True))
         self.stream.flush()

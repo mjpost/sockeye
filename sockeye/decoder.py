@@ -270,7 +270,7 @@ class TransformerDecoder(Decoder):
             target = mx.sym.Dropout(data=target, p=self.config.dropout_prepost)
 
         for layer in self.layers:
-            target = layer(target, target_bias, source_encoded, source_bias)
+            target, _ = layer(target, target_bias, source_encoded, source_bias)
         target = self.final_process(target, None)
 
         return target
@@ -315,17 +315,17 @@ class TransformerDecoder(Decoder):
 
         new_states = [source_encoded, source_encoded_lengths]
         layer_caches = self._get_cache_per_layer(cast(List[mx.sym.Symbol], cache))
-        attention_probs = None
+        attention_probs = []
         for layer, layer_cache in zip(self.layers, layer_caches):
-            target, layer_probs = layer(target=target,
-                                        target_bias=target_bias,
-                                        source=source_encoded,
-                                        source_bias=source_bias,
-                                        cache=layer_cache)
+            target, layer_probs = layer(target,
+                                        target_bias,
+                                        source_encoded,
+                                        source_bias,
+                                        layer_cache)
             # store updated keys and values in states list.
             # (layer.__call__() has the side-effect of updating contents of layer_cache)
             new_states += [layer_cache['k'], layer_cache['v']]
-            attention_probs = layer_probs
+            attention_probs.append(layer_probs)
 
         # (batch_size, 1, model_size)
         target = self.final_process(target, None)
@@ -1086,7 +1086,7 @@ class ConvolutionalDecoder(Decoder):
                                   target_embed_lengths)
 
             # (batch_size, target_seq_len, num_embed)
-            context = att_layer(target_hidden, source_encoded, source_encoded_lengths)
+            context, _ = att_layer(target_hidden, source_encoded, source_encoded_lengths)
 
             # residual connection:
             target_hidden = target_hidden_prev + target_hidden + context
@@ -1153,7 +1153,7 @@ class ConvolutionalDecoder(Decoder):
 
             # (batch_size, 1, num_embed)
             # TODO: compute the source encoded projection only once for efficiency reasons
-            context_step = att_layer(target_hidden_step, source_encoded, source_encoded_lengths)
+            context_step, _ = att_layer(target_hidden_step, source_encoded, source_encoded_lengths)
 
             # residual connection:
             target_hidden_step = target_hidden_step_prev + target_hidden_step + context_step

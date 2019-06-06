@@ -1369,6 +1369,10 @@ def add_inference_args(params):
                                default=0.9,
                                type=float,
                                help='Threshold to consider a soft alignment a sure alignment. Default: %(default)s.')
+    decode_params.add_argument('--output-attention', '-oa',
+                               action='store_true',
+                               default=False,
+                               help='Whether to output attention scores (only with JSON object)')
 
     # common params with score CLI
     add_length_penalty_args(decode_params)
