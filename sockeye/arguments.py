@@ -138,16 +138,33 @@ def regular_folder() -> Callable:
 
 def int_greater_or_equal(threshold: int) -> Callable:
     """
-    Returns a method that can be used in argument parsing to check that the argument is greater or equal to `threshold`.
+    Returns a method that can be used in argument parsing to check that the int argument is greater or equal to `threshold`.
 
     :param threshold: The threshold that we assume the cli argument value is greater or equal to.
     :return: A method that can be used as a type in argparse.
     """
 
-    def check_greater_equal(value_to_check):
-        value_to_check = int(value_to_check)
+    def check_greater_equal(value: str):
+        value_to_check = int(value)
         if value_to_check < threshold:
             raise argparse.ArgumentTypeError("must be greater or equal to %d." % threshold)
+        return value_to_check
+
+    return check_greater_equal
+
+
+def float_greater_or_equal(threshold: float) -> Callable:
+    """
+    Returns a method that can be used in argument parsing to check that the float argument is greater or equal to `threshold`.
+
+    :param threshold: The threshold that we assume the cli argument value is greater or equal to.
+    :return: A method that can be used as a type in argparse.
+    """
+
+    def check_greater_equal(value: str):
+        value_to_check = float(value)
+        if value_to_check < threshold:
+            raise argparse.ArgumentTypeError("must be greater or equal to %f." % threshold)
         return value_to_check
 
     return check_greater_equal
@@ -833,10 +850,25 @@ def add_training_args(params):
                               help='How to normalize the loss. By default loss is normalized by the number '
                                    'of valid (non-PAD) tokens (%s).' % C.LOSS_NORM_VALID)
 
+    train_params.add_argument('--length-task',
+                              type=str,
+                              default=None,
+                              choices=[C.LENGTH_TASK_RATIO, C.LENGTH_TASK_LENGTH],
+                              help='If specified, adds an auxiliary task during training to predict source/target length ratios '
+                                    '(mean squared error loss), or absolute lengths (Poisson) loss. Default %(default)s.')
+    train_params.add_argument('--length-task-weight',
+                              type=float_greater_or_equal(0.0),
+                              default=1.0,
+                              help='The weight of the auxiliary --length-task loss. Default %(default)s.')
+    train_params.add_argument('--length-task-layers',
+                              type=int_greater_or_equal(1),
+                              default=1,
+                              help='Number of fully-connected layers for predicting the length ratio. Default %(default)s.')
+
     train_params.add_argument('--metrics',
                               nargs='+',
                               default=[C.PERPLEXITY],
-                              choices=[C.PERPLEXITY, C.ACCURACY],
+                              choices=[C.PERPLEXITY, C.ACCURACY, C.LENRATIO_MSE],
                               help='Names of metrics to track on training and validation data. Default: %(default)s.')
     train_params.add_argument('--optimized-metric',
                               default=C.PERPLEXITY,
@@ -851,6 +883,10 @@ def add_training_args(params):
                               type=int,
                               default=None,
                               help='Maximum number of updates. Default: %(default)s.')
+    train_params.add_argument('--update-interval',
+                              type=int,
+                              default=1,
+                              help="Number of batch gradients to accumulate before updating. Default: %(default)s.")
     train_params.add_argument('--min-samples',
                               type=int,
                               default=None,
@@ -1150,24 +1186,15 @@ def add_score_cli_args(params):
                         help='Maximum sequence length in tokens.'
                              'Use "x:x" to specify separate values for src&tgt. Default: Read from model.')
 
-    params.add_argument('--length-penalty-alpha',
-                        default=1.0,
-                        type=float,
-                        help='Alpha factor for the length penalty used in scoring: '
-                        '(beta + len(Y))**alpha/(beta + 1)**alpha. A value of 0.0 will therefore turn off '
-                        'length normalization. Default: %(default)s')
-
-    params.add_argument('--length-penalty-beta',
-                        default=0.0,
-                        type=float,
-                        help='Beta factor for the length penalty used in scoring: '
-                        '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
-
     params.add_argument('--softmax-temperature',
                         type=float,
                         default=None,
                         help='Controls peakiness of model predictions. Values < 1.0 produce '
                         'peaked predictions, values > 1.0 produce smoothed distributions.')
+
+    # common params with translate CLI
+    add_length_penalty_args(params)
+    add_brevity_penalty_args(params)
 
     params.add_argument("--output", "-o", default=None,
                         help="File to write output to. Default: STDOUT.")
@@ -1309,10 +1336,16 @@ def add_inference_args(params):
                                     'to calculate maximum output length for beam search for each sentence. '
                                     'Default: %(default)s.')
     decode_params.add_argument('--restrict-lexicon',
-                               type=str,
+                               nargs='+',
+                               type=multiple_values(num_values=2, data_type=str),
                                default=None,
-                               help="Specify top-k lexicon to restrict output vocabulary based on source. See lexicon "
-                                    "module. Default: %(default)s.")
+                               help="Specify top-k lexicon to restrict output vocabulary to the k most likely context-"
+                                    "free translations of the source words in each sentence (Devlin, 2017). See the "
+                                    "lexicon module for creating top-k lexicons. To use multiple lexicons, provide "
+                                    "'--restrict-lexicon key1:path1 key2:path2 ...' and use JSON input to specify the "
+                                    "lexicon for each sentence: "
+                                    "{\"text\": \"some input string\", \"restrict_lexicon\": \"key\"}. "
+                                    "Default: %(default)s.")
     decode_params.add_argument('--restrict-lexicon-topk',
                                type=int,
                                default=None,
@@ -1335,23 +1368,51 @@ def add_inference_args(params):
     decode_params.add_argument('--sure-align-threshold',
                                default=0.9,
                                type=float,
-                               help='Threshold to consider a soft alignment a sure alignment. Default: %(default)s')
-    decode_params.add_argument('--length-penalty-alpha',
-                               default=1.0,
-                               type=float,
-                               help='Alpha factor for the length penalty used in beam search: '
-                                    '(beta + len(Y))**alpha/(beta + 1)**alpha. A value of 0.0 will therefore turn off '
-                                    'length normalization. Default: %(default)s')
-    decode_params.add_argument('--length-penalty-beta',
-                               default=0.0,
-                               type=float,
-                               help='Beta factor for the length penalty used in beam search: '
-                                    '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
+                               help='Threshold to consider a soft alignment a sure alignment. Default: %(default)s.')
+
+    # common params with score CLI
+    add_length_penalty_args(decode_params)
+    add_brevity_penalty_args(decode_params)
+
     decode_params.add_argument('--override-dtype',
                                default=None,
                                type=str,
                                help='EXPERIMENTAL: may be changed or removed in future. Overrides training dtype of '
-                                    'encoders and decoders during inference. Default: %(default)s')
+                                    'encoders and decoders during inference. Default: %(default)s.')
+
+
+def add_length_penalty_args(params):
+    params.add_argument('--length-penalty-alpha',
+                        default=1.0,
+                        type=float,
+                        help='Alpha factor for the length penalty used in beam search: '
+                             '(beta + len(Y))**alpha/(beta + 1)**alpha. A value of 0.0 will therefore turn off '
+                             'length normalization. Default: %(default)s.')
+    params.add_argument('--length-penalty-beta',
+                        default=0.0,
+                        type=float,
+                        help='Beta factor for the length penalty used in scoring: '
+                        '(beta + len(Y))**alpha/(beta + 1)**alpha. Default: %(default)s')
+
+
+def add_brevity_penalty_args(params):
+    params.add_argument('--brevity-penalty-type',
+                        default='none',
+                        type=str,
+                        choices=[C.BREVITY_PENALTY_NONE, C.BREVITY_PENALTY_LEARNED, C.BREVITY_PENALTY_CONSTANT],
+                        help='If specified, adds brevity penalty to the hypotheses\' scores, calculated with learned '
+                             'or constant length ratios. The latter, by default, uses the length ratio (|ref|/|hyp|) '
+                             'estimated from the training data and averaged over models. Default: %(default)s.')
+    params.add_argument('--brevity-penalty-weight',
+                        default=1.0,
+                        type=float_greater_or_equal(0.0),
+                        help='Scaler for the brevity penalty in beam search: weight * log(BP) + score. Default: %(default)s')
+    params.add_argument('--brevity-penalty-constant-length-ratio',
+                        default=0.0,
+                        type=float_greater_or_equal(0.0),
+                        help='Has effect if --brevity-penalty-type is set to \'constant\'. If positive, overrides the length '
+                             'ratio, used for brevity penalty calculation, for all inputs. If zero, uses the average of length '
+                             'ratios from the training data over all models. Default: %(default)s.')
 
 
 def add_evaluate_args(params):

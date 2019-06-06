@@ -25,6 +25,7 @@ from . import utils as utils_image
 from .. import constants as C
 from .. import data_io
 from .. import lexical_constraints as constrained
+from .. import lexicon
 from .. import model
 from .. import utils
 from .. import vocab
@@ -70,6 +71,7 @@ class ImageCaptioner(Translator):
     :param context: MXNet context to bind modules to.
     :param ensemble_mode: Ensemble mode: linear or log_linear combination.
     :param length_penalty: Length penalty instance.
+    :param brevity_penalty: Brevity penalty instance.
     :param beam_prune: Beam pruning difference threshold.
     :param beam_search_stop: The stopping criterium.
     :param models: List of models.
@@ -130,6 +132,7 @@ class ImageCaptioner(Translator):
     def _get_inference_input(self,
                              trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray,
                                                                            int,
+                                                                           Optional[lexicon.TopKLexicon],
                                                                            List[
                                                                                Optional[constrained.RawConstraintList]],
                                                                            List[
@@ -146,6 +149,7 @@ class ImageCaptioner(Translator):
         """
         batch_size = len(trans_inputs)
         image_paths = [None for _ in range(batch_size)]  # type: List[Optional[str]]
+        restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]
         raw_constraints = [None for _ in range(batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
         raw_avoid_list = [None for _ in range(batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
         for j, trans_input in enumerate(trans_inputs):
@@ -165,9 +169,8 @@ class ImageCaptioner(Translator):
 
         max_input_length = 0
         max_output_lengths = [self.models[0].get_max_output_length(max_input_length)] * len(image_paths)
-        return mx.nd.array(images), max_input_length, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths,
-                                                                                                   ctx=self.context,
-                                                                                                   dtype='int32')
+        return mx.nd.array(images), max_input_length, restrict_lexicon, raw_constraints, raw_avoid_list, \
+                mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
 
 def load_models(context: mx.context.Context,

@@ -10,6 +10,53 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.99]
+### Changed
+- Updated to [MXNet 1.4.1](https://github.com/apache/incubator-mxnet/tree/1.4.1)
+
+## [1.18.98]
+### Changed
+- Converted several transformer-related layer implementations to Gluon HybridBlocks. No functional change.
+
+## [1.18.97]
+### Changed
+- Updated to PyYAML 5.1
+
+## [1.18.96]
+### Changed
+- Extracted prepare vocab functionality in the build vocab step into its own function. This matches the pattern in prepare data and train where the main() function only has argparsing, and it invokes a separate function to do the work. This is to allow modules that import this one to circumvent the command line. 
+
+## [1.18.95]
+### Changed
+- Removed custom operators from transformer models and replaced them with symbolic operators.
+  Improves Performance.
+
+## [1.18.94]
+### Added
+- Added ability to accumulate gradients over multiple batches (--update-interval). This allows simulation of large
+  batch sizes on environments with limited memory. For example: training with `--batch-size 4096 --update-interval 2`
+  should be close to training with `--batch-size 8192` at smaller memory footprint.
+
+## [1.18.93]
+### Fixed
+- Made `brevity_penalty` argument in `Translator` class optional to ensure backwards compatibility.
+
+## [1.18.92]
+### Added
+- Added sentence length (and length ratio) prediction to be able to discourage hypotheses that are too short at inference time. Can be enabled for training with `--length-task` and with `--brevity-penalty-type` during inference.
+
+## [1.18.91]
+### Changed
+- Multiple lexicons can now be specified with the `--restrict-lexicon` option:
+  - For a single lexicon: `--restrict-lexicon /path/to/lexicon`.
+  - For multiple lexicons: `--restrict-lexicon key1:/path/to/lexicon1 key2:/path/to/lexicon2 ...`.
+  - Use `--json-input` to specify the lexicon to use for each input, ex: `{"text": "some input string", "restrict_lexicon": "key1"}`.
+
+## [1.18.90]
+### Changed
+- Updated to [MXNet 1.4.0](https://github.com/apache/incubator-mxnet/tree/1.4.0)
+- Integration tests no longer check for equivalence of outputs with batch size 2
+
 ## [1.18.89]
 ### Fixed
 - Made the length ratios per bucket change backwards compatible.
