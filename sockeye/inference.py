@@ -970,7 +970,7 @@ class TranslatorOutput:
         if output_attentions:
             _d['attention'] = []
             for i, word in enumerate(self.translation.split()):
-                _d['attention'].append(['{:.5f}'.format(f) for f in self.attention_matrix[i]])
+                _d['attention'].append([float(f) for f in self.attention_matrix[i]])
 
         if self.nbest_translations is not None and len(self.nbest_translations) > 1:
             _d['translations'] = self.nbest_translations
