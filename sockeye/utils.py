@@ -18,6 +18,7 @@ import binascii
 import errno
 import glob
 import gzip
+import math
 import itertools
 import logging
 import os
@@ -252,6 +253,11 @@ class OnlineMeanAndVariance:
             return float('nan')
         else:
             return self._M2 / self._count
+
+    @property
+    def std(self) -> float:
+        variance = self.variance
+        return math.sqrt(variance) if not math.isnan(variance) else 0.0
 
 
 def top1(scores: mx.nd.NDArray,
@@ -931,7 +937,7 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
                 os.remove(param_fname_n)
 
 
-def cast_conditionally(data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
+def cast_conditionally(F, data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
     """
     Workaround until no-op cast will be fixed in MXNet codebase.
     Creates cast symbol only if dtype is different from default one, i.e. float32.
@@ -941,11 +947,11 @@ def cast_conditionally(data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
     :return: Cast symbol or just data symbol.
     """
     if dtype != C.DTYPE_FP32:
-        return mx.sym.cast(data=data, dtype=dtype)
+        return F.cast(data=data, dtype=dtype)
     return data
 
 
-def uncast_conditionally(data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
+def uncast_conditionally(F, data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
     """
     Workaround until no-op cast will be fixed in MXNet codebase.
     Creates cast to float32 symbol only if dtype is different from default one, i.e. float32.
@@ -955,7 +961,7 @@ def uncast_conditionally(data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
     :return: Cast symbol or just data symbol.
     """
     if dtype != C.DTYPE_FP32:
-        return mx.sym.cast(data=data, dtype=C.DTYPE_FP32)
+        return F.cast(data=data, dtype=C.DTYPE_FP32)
     return data
 
 

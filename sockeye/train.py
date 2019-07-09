@@ -17,9 +17,8 @@ Simple Training CLI.
 
 # Start the forkserver. It is important that this is done before any other imports so that the forkserver is in a clean
 # state.
-if __name__ == "__main__":
-    import sockeye.multiprocessing_utils as mp
-    mp.initialize()
+import sockeye.multiprocessing_utils as mp
+mp.initialize()
 
 
 import argparse
@@ -44,6 +43,7 @@ from . import decoder
 from . import encoder
 from . import initializer
 from . import loss
+from . import layers
 from . import lr_scheduler
 from . import model
 from . import rnn
@@ -685,6 +685,16 @@ def create_model_config(args: argparse.Namespace,
                                   normalization_type=args.loss_normalization_type,
                                   label_smoothing=args.label_smoothing)
 
+    if args.length_task is not None:
+        config_length_task = layers.LengthRatioConfig(num_layers=args.length_task_layers, weight=args.length_task_weight)
+        link = C.LINK_NORMAL if args.length_task == C.LENGTH_TASK_RATIO else C.LINK_POISSON
+        config_length_task_loss = loss.LossConfig(name=C.LENRATIO_REGRESSION,
+                                                   length_task_link=link,
+                                                   length_task_weight=args.length_task_weight)
+    else:
+        config_length_task = None
+        config_length_task_loss = None
+
     model_config = model.ModelConfig(config_data=config_data,
                                      vocab_source_size=source_vocab_size,
                                      vocab_target_size=target_vocab_size,
@@ -693,6 +703,8 @@ def create_model_config(args: argparse.Namespace,
                                      config_encoder=config_encoder,
                                      config_decoder=config_decoder,
                                      config_loss=config_loss,
+                                     config_length_task_loss=config_length_task_loss,
+                                     config_length_task=config_length_task,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
                                      weight_normalization=args.weight_normalization,
@@ -723,7 +735,9 @@ def create_training_model(config: model.ModelConfig,
                                             default_bucket_key=train_iter.default_bucket_key,
                                             bucketing=not args.no_bucketing,
                                             gradient_compression_params=gradient_compression_params(args),
-                                            fixed_param_names=args.fixed_param_names)
+                                            gradient_accumulation=args.update_interval > 1,
+                                            fixed_param_names=args.fixed_param_names,
+                                            fixed_param_strategy=args.fixed_param_strategy)
 
     return training_model
 
@@ -759,6 +773,8 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
     else:
         gradient_clipping_type = args.gradient_clipping_type
 
+    effective_batch_size = args.batch_size * args.update_interval
+
     # Note: for 'abs' we use the implementation inside of MXNet's optimizer and 'norm_*' we implement ourselves
     # inside the TrainingModel.
     if gradient_clipping_threshold is not None and gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
@@ -767,10 +783,10 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
         optimizer_params["momentum"] = args.momentum
     if args.loss_normalization_type == C.LOSS_NORM_VALID:
         # When we normalize by the number of non-PAD symbols in a batch we need to disable rescale_grad.
-        optimizer_params["rescale_grad"] = 1.0
+        optimizer_params["rescale_grad"] = 1.0 / args.update_interval
     elif args.loss_normalization_type == C.LOSS_NORM_BATCH:
         # Making MXNet module API's default scaling factor explicit
-        optimizer_params["rescale_grad"] = 1.0 / args.batch_size
+        optimizer_params["rescale_grad"] = 1.0 / effective_batch_size
     # Manually specified params
     if args.optimizer_params:
         optimizer_params.update(args.optimizer_params)
@@ -797,10 +813,14 @@ def create_optimizer_config(args: argparse.Namespace, source_vocab_sizes: List[i
                              kvstore=args.kvstore,
                              initializer=weight_init,
                              gradient_clipping_type=gradient_clipping_type,
-                             gradient_clipping_threshold=gradient_clipping_threshold)
+                             gradient_clipping_threshold=gradient_clipping_threshold,
+                             update_interval=args.update_interval)
     config.set_lr_scheduler(lr_sched)
     logger.info("Optimizer: %s", config)
     logger.info("Gradient Compression: %s", gradient_compression_params(args))
+    if args.update_interval > 1:
+        logger.info("Gradient accumulation over %d batches. Effective batch size: %d",
+                    args.update_interval, effective_batch_size)
     return config
 
 
@@ -840,6 +860,9 @@ def train(args: argparse.Namespace) -> training.TrainState:
     max_seq_len_target = max_seq_len_target + C.SPACE_FOR_XOS
     logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
                 max_seq_len_source, max_seq_len_target)
+
+    check_condition(args.length_task is not None or C.LENRATIO_MSE not in args.metrics,
+                    "%s metrics requires enabling length ratio prediction with --length-task." % C.LENRATIO_MSE)
 
     with ExitStack() as exit_stack:
         context = utils.determine_context(device_ids=args.device_ids,
@@ -897,6 +920,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
         if min_epochs is not None and max_epochs is not None:
             check_condition(min_epochs <= max_epochs,
                             "Minimum number of epochs must be smaller than maximum number of epochs")
+
         # Fixed training schedule always runs for a set number of updates
         if args.learning_rate_schedule:
             min_updates = None
@@ -921,6 +945,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                      metrics=args.metrics,
                                      checkpoint_interval=args.checkpoint_interval,
                                      max_num_not_improved=max_num_checkpoint_not_improved,
+                                     max_checkpoints=args.max_checkpoints,
                                      min_samples=min_samples,
                                      max_samples=max_samples,
                                      min_updates=min_updates,

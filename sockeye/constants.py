@@ -14,6 +14,8 @@
 """
 Defines various constants used throughout the project
 """
+import sys
+
 import mxnet as mx
 import numpy as np
 
@@ -43,6 +45,7 @@ TRANSFORMER_ENCODER_PREFIX = ENCODER_PREFIX + "transformer_"
 CNN_ENCODER_PREFIX = ENCODER_PREFIX + "cnn_"
 CHAR_SEQ_ENCODER_PREFIX = ENCODER_PREFIX + "char_"
 DEFAULT_OUTPUT_LAYER_PREFIX = "target_output_"
+LENRATIOS_OUTPUT_LAYER_PREFIX = "length_ratio_layer_"
 
 # embedding prefixes
 SOURCE_EMBEDDING_PREFIX = "source_" + EMBEDDING_PREFIX
@@ -178,6 +181,11 @@ SOURCE_NAME = "source"
 SOURCE_LENGTH_NAME = "source_length"
 TARGET_NAME = "target"
 TARGET_LABEL_NAME = "target_label"
+LENRATIO_LABEL_NAME = "length_ratio_label"
+LENRATIO_LABEL_OUTPUT_NAME = "length_ratio_label" + "_output"
+LENRATIO_NAME = "length_ratio"
+LENRATIO_LOSS_NAME = LENRATIO_NAME + "_loss"
+LENRATIO_OUTPUT_NAME = LENRATIO_NAME + "_output"
 LEXICON_NAME = "lexicon"
 
 SOURCE_ENCODED_NAME = "encoded_source"
@@ -212,6 +220,7 @@ BEAM_SEARCH_STOP_ALL = 'all'
 # Inference Input JSON constants
 JSON_TEXT_KEY = "text"
 JSON_FACTORS_KEY = "factors"
+JSON_RESTRICT_LEXICON_KEY = "restrict_lexicon"
 JSON_CONSTRAINTS_KEY = "constraints"
 JSON_AVOID_KEY = "avoid"
 JSON_ENCODING = "utf-8"
@@ -258,7 +267,7 @@ ARGS_MAY_DIFFER = ["overwrite_output", "use_tensorboard", "quiet",
                    "keep_last_params", "seed",
                    "max_updates", "min_updates",
                    "max_num_epochs", "min_num_epochs",
-                   "max_samples", "min_samples"]
+                   "max_samples", "min_samples", "max_checkpoints"]
 
 # Other argument constants
 TRAINING_ARG_SOURCE = "--source"
@@ -365,6 +374,7 @@ OUTPUT_HANDLERS_SCORING = [OUTPUT_HANDLER_SCORE,
 # metrics
 ACCURACY = 'accuracy'
 PERPLEXITY = 'perplexity'
+LENRATIO_MSE = 'length-ratio-mse'
 BLEU = 'bleu'
 CHRF = 'chrf'
 ROUGE = 'rouge'
@@ -377,9 +387,10 @@ ROUGE_VAL = ROUGE + "-val"
 ROUGE_1_VAL = ROUGE1 + "-val"
 ROUGE_2_VAL = ROUGE2 + "-val"
 ROUGE_L_VAL = ROUGEL + "-val"
+LENRATIO_VAL = 'length-ratio-mse'
 AVG_TIME = "avg-sec-per-sent-val"
 DECODING_TIME = "decode-walltime-val"
-METRICS = [PERPLEXITY, ACCURACY, BLEU, CHRF, ROUGE1]
+METRICS = [PERPLEXITY, ACCURACY, LENRATIO_MSE, BLEU, CHRF, ROUGE1]
 METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, CHRF: True, ROUGE1: True, PERPLEXITY: False}
 METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, CHRF: 0.0, ROUGE1: 0.0, PERPLEXITY: np.inf}
 METRICS_REQUIRING_DECODER = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
@@ -387,6 +398,12 @@ EVALUATE_METRICS = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'
+LENRATIO_REGRESSION = 'length-ratio-regression'
+
+LINK_NORMAL = 'normal'
+LINK_POISSON = 'poisson'
+LENGTH_TASK_RATIO = 'ratio'
+LENGTH_TASK_LENGTH = 'length'
 
 LOSS_NORM_BATCH = 'batch'
 LOSS_NORM_VALID = "valid"
@@ -407,6 +424,7 @@ LARGE_VALUES = {
     # https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Precision_limits_on_integer_values.
     DTYPE_FP32: LARGE_POSITIVE_VALUE
 }
+LARGEST_INT = sys.maxsize
 
 LHUC_NAME = "lhuc"
 # lhuc application points
@@ -416,6 +434,17 @@ LHUC_STATE_INIT = "state_init"
 LHUC_ALL = "all"
 LHUC_CHOICES = [LHUC_ENCODER, LHUC_DECODER, LHUC_STATE_INIT, LHUC_ALL]
 
+# Strategies for fixing various parameters.
+FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER = "all_except_decoder"
+FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS = "all_except_outer_layers"
+FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS = "all_except_embeddings"
+FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ = "all_except_output_proj"
+
+FIXED_PARAM_STRATEGY_CHOICES = [FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER,
+                                FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS,
+                                FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS,
+                                FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ]
+
 # data sharding
 SHARD_NAME = "shard.%05d"
 SHARD_SOURCE = SHARD_NAME + ".source"
@@ -423,6 +452,7 @@ SHARD_TARGET = SHARD_NAME + ".target"
 DATA_INFO = "data.info"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
+# TODO: with next bump remove branch over data_statistics.length_ratio_stats_per_bucket
 PREPARED_DATA_VERSION = 2
 
 # reranking
@@ -436,9 +466,13 @@ SCORING_TYPE_LOGPROB = 'logprob'
 SCORING_TYPE_DEFAULT = SCORING_TYPE_NEGLOGPROB
 SCORING_TYPE_CHOICES = [SCORING_TYPE_NEGLOGPROB, SCORING_TYPE_LOGPROB]
 
-
 # parameter averaging
 AVERAGE_BEST = 'best'
 AVERAGE_LAST = 'last'
 AVERAGE_LIFESPAN = 'lifespan'
 AVERAGE_CHOICES = [AVERAGE_BEST, AVERAGE_LAST, AVERAGE_LIFESPAN]
+
+# brevity penalty
+BREVITY_PENALTY_CONSTANT = 'constant'
+BREVITY_PENALTY_LEARNED = 'learned'
+BREVITY_PENALTY_NONE = 'none'
